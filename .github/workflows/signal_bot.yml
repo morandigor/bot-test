@@ -1,0 +1,65 @@
+name: signal-bot
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-signal-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            state.json
+            logs
+          key: bot-state-${{ github.run_id }}
+          restore-keys: |
+            bot-state-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run one cycle
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DRY_RUN: ${{ secrets.DRY_RUN }}
+          TIMEFRAME_SIGNAL: 15min
+          TIMEFRAME_TREND: 1h
+          CHECK_INTERVAL_SECONDS: 300
+          MAX_SIGNALS_PER_DAY: 3
+          COOLDOWN_HOURS_PER_SYMBOL: 4
+          DUPLICATE_WINDOW_MINUTES: 360
+          BOT_TIMEZONE: UTC
+          STATE_FILE: state.json
+          LOG_FILE: logs/bot.log
+          SIGNAL_SCORE_THRESHOLD: 5
+          MIN_RR: 2.0
+          PREFERRED_RR: 2.5
+          OUTPUTSIZE: 500
+        run: python bot_once.py
+
+      - name: Save state cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            state.json
+            logs
+          key: bot-state-${{ github.run_id }}
