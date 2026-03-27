@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      send_test_message:
+        description: "Send a fixed Telegram test message and skip strategy evaluation"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   run-signal-cycle:
@@ -39,6 +45,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           DRY_RUN: ${{ secrets.DRY_RUN }}
+          SEND_TEST_MESSAGE: ${{ github.event.inputs.send_test_message || 'false' }}
+          TEST_MESSAGE_TEXT: "Teste Telegram OK - signal-bot"
           TIMEFRAME_SIGNAL: 15min
           TIMEFRAME_TREND: 1h
           CHECK_INTERVAL_SECONDS: 300

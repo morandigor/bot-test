@@ -19,6 +19,16 @@ class Config:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
     dry_run: bool = os.getenv("DRY_RUN", "true").lower() in {"1", "true", "yes", "on"}
+    send_test_message: bool = os.getenv("SEND_TEST_MESSAGE", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    test_message_text: str = os.getenv(
+        "TEST_MESSAGE_TEXT",
+        "Teste Telegram OK - signal-bot",
+    )
 
     timeframe_signal: str = os.getenv("TIMEFRAME_SIGNAL", "15min")
     timeframe_trend: str = os.getenv("TIMEFRAME_TREND", "1h")

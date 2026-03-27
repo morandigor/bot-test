@@ -105,6 +105,7 @@ Workflow pronto em `.github/workflows/signal_bot.yml`:
 - Agenda: a cada 5 minutos (`*/5 * * * *`)
 - Executa `python bot_once.py` (um ciclo por run)
 - Restaura e salva `state.json` e `logs/` via cache para manter cooldown/contador
+- Em `Run workflow`, voce pode marcar `send_test_message` para enviar uma mensagem fixa no Telegram sem depender de sinal
 
 Configure no repositório (Settings -> Secrets and variables -> Actions):
 
