@@ -3,7 +3,7 @@
 Bot de sinais em Python para **XAU/USD** e **USD/CHF**.
 
 - Nao executa ordens.
-- Busca dados via Twelve Data (REST).
+- Busca dados via yfinance.
 - Envia sinais no Telegram (ou simula em dry-run).
 - Usa abordagem conservadora com confirmacoes tecnicas rastreaveis.
 
@@ -75,7 +75,6 @@ O bot le variaveis de `.env`. Nao mantenha credenciais sensiveis hardcoded no co
 ### Exemplo de `.env`
 
 ```env
-TWELVE_DATA_API_KEY=coloque_sua_chave
 TELEGRAM_CHAT_ID=seu_chat_id
 TELEGRAM_BOT_TOKEN=seu_bot_token
 
@@ -109,7 +108,6 @@ Workflow pronto em `.github/workflows/signal_bot.yml`:
 
 Configure no repositório (Settings -> Secrets and variables -> Actions):
 
-- `TWELVE_DATA_API_KEY`
 - `TELEGRAM_CHAT_ID`
 - `TELEGRAM_BOT_TOKEN`
 - `DRY_RUN` (`true` ou `false`)

@@ -16,10 +16,7 @@ def main() -> None:
     logger = setup_logging(CONFIG.log_file)
     state_manager = StateManager(Path(CONFIG.state_file))
     state = state_manager.load()
-    client = TwelveDataClient(
-        base_url=CONFIG.base_url_twelve,
-        api_key=CONFIG.twelve_data_api_key,
-    )
+    client = TwelveDataClient()
     run_once(logger, client, state_manager, state)
 
 

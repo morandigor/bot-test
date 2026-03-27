@@ -1,103 +1,110 @@
-"""Twelve Data API client helpers with retries and normalization."""
+"""Market data helpers backed by yfinance.
+
+The module name and client class are kept for compatibility with the rest of the
+project, but the underlying provider is yfinance.
+"""
 
 from __future__ import annotations
 
-import time
 from typing import Any, Dict
 
 import pandas as pd
-import requests
+import yfinance as yf
+
+SYMBOL_MAP = {
+    "XAU/USD": "GC=F",
+    "XAUUSD": "GC=F",
+    "USD/CHF": "USDCHF=X",
+    "USDCHF": "USDCHF=X",
+}
+
+INTERVAL_MAP = {
+    "1min": ("1m", "7d"),
+    "5min": ("5m", "60d"),
+    "15min": ("15m", "60d"),
+    "30min": ("30m", "60d"),
+    "45min": ("60m", "60d"),
+    "1h": ("60m", "730d"),
+    "4h": ("1h", "730d"),
+    "1day": ("1d", "max"),
+}
 
 
 class TwelveDataError(Exception):
-    """Raised when Twelve Data request fails after retries."""
+    """Raised when market data fetch or normalization fails."""
 
 
 class TwelveDataClient:
-    """Small REST client for Twelve Data endpoints used by the bot."""
+    """Compatibility wrapper exposing the same client-style interface."""
 
-    def __init__(self, base_url: str, api_key: str, timeout: int = 15) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
-        self.timeout = timeout
+    def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: int = 15) -> None:
+        del base_url, api_key, timeout
 
-    def _request_with_retry(
-        self,
-        endpoint: str,
-        params: Dict[str, Any],
-        max_retries: int = 5,
-        backoff_base: float = 1.0,
-    ) -> Dict[str, Any]:
-        """Call Twelve Data endpoint with exponential backoff retry."""
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        merged = {**params, "apikey": self.api_key}
+    @staticmethod
+    def _map_symbol(symbol: str) -> str:
+        return SYMBOL_MAP.get(symbol, symbol)
 
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(url, params=merged, timeout=self.timeout)
-                if response.status_code == 429:
-                    raise TwelveDataError("Rate limit (429)")
-                response.raise_for_status()
-                data = response.json()
+    @staticmethod
+    def _map_interval(interval: str) -> tuple[str, str]:
+        if interval not in INTERVAL_MAP:
+            raise TwelveDataError(f"Unsupported timeframe: {interval}")
+        return INTERVAL_MAP[interval]
 
-                if data.get("status") == "error":
-                    code = data.get("code")
-                    message = data.get("message", "Unknown API error")
-                    if code in {429, 500, 503}:
-                        raise TwelveDataError(f"Transient API error: {code} - {message}")
-                    raise TwelveDataError(f"API error: {code} - {message}")
+    @staticmethod
+    def _normalize_history(df: pd.DataFrame, outputsize: int) -> pd.DataFrame:
+        if df.empty:
+            raise TwelveDataError("No time series data returned")
 
-                return data
+        normalized = df.rename(
+            columns={
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        ).copy()
 
-            except (requests.RequestException, TwelveDataError) as exc:
-                is_last = attempt >= max_retries - 1
-                if is_last:
-                    raise TwelveDataError(
-                        f"Request failed after {max_retries} attempts: {exc}"
-                    ) from exc
+        if "volume" not in normalized.columns:
+            normalized["volume"] = 0.0
 
-                sleep_s = backoff_base * (2 ** attempt)
-                time.sleep(sleep_s)
+        normalized.index = pd.to_datetime(normalized.index, utc=True, errors="coerce")
+        normalized = normalized[["open", "high", "low", "close", "volume"]]
+        normalized = normalized.apply(pd.to_numeric, errors="coerce")
+        normalized = normalized.dropna(subset=["open", "high", "low", "close"])
+        normalized = normalized[~normalized.index.isna()]
+        normalized = normalized.sort_index()
 
-        raise TwelveDataError("Unexpected retry loop termination")
+        if outputsize > 0:
+            normalized = normalized.tail(outputsize)
+
+        if normalized.empty:
+            raise TwelveDataError("No normalized candle data available")
+
+        return normalized
+
+    def get_time_series(self, symbol: str, interval: str, outputsize: int = 500) -> pd.DataFrame:
+        """Fetch OHLCV as a normalized DataFrame indexed by datetime."""
+        ticker = self._map_symbol(symbol)
+        yf_interval, period = self._map_interval(interval)
+
+        try:
+            history = yf.Ticker(ticker).history(interval=yf_interval, period=period, auto_adjust=False)
+        except Exception as exc:  # noqa: BLE001
+            raise TwelveDataError(f"Failed to fetch time series for {symbol} {interval}: {exc}") from exc
+
+        return self._normalize_history(history, outputsize)
 
     def get_quote(self, symbol: str) -> Dict[str, Any]:
-        """Fetch last quote for symbol."""
-        return self._request_with_retry("quote", {"symbol": symbol})
+        """Fetch the latest traded price for the symbol."""
+        candles = self.get_time_series(symbol, "1min", outputsize=1)
+        last_close = candles["close"].iloc[-1]
+        return {"symbol": symbol, "price": float(last_close)}
 
-    def get_time_series(
-        self,
-        symbol: str,
-        interval: str,
-        outputsize: int = 500,
-    ) -> pd.DataFrame:
-        """Fetch OHLCV as normalized DataFrame indexed by datetime (ascending)."""
-        raw = self._request_with_retry(
-            "time_series",
-            {
-                "symbol": symbol,
-                "interval": interval,
-                "outputsize": outputsize,
-                "format": "JSON",
-            },
-        )
+    def get_candles(self, symbol: str, timeframe: str, outputsize: int = 500) -> pd.DataFrame:
+        """Compatibility alias requested by the project contract."""
+        return self.get_time_series(symbol, timeframe, outputsize)
 
-        values = raw.get("values")
-        if not values:
-            raise TwelveDataError(f"No time series data returned for {symbol} {interval}")
-
-        df = pd.DataFrame(values)
-        required = ["datetime", "open", "high", "low", "close"]
-        missing = [c for c in required if c not in df.columns]
-        if missing:
-            raise TwelveDataError(f"Missing columns in response: {missing}")
-
-        df["datetime"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
-        for col in ["open", "high", "low", "close", "volume"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.dropna(subset=["datetime", "open", "high", "low", "close"]).copy()
-        df = df.set_index("datetime").sort_index()
-
-        return df
+    def get_price(self, symbol: str) -> float:
+        """Compatibility alias requested by the project contract."""
+        return float(self.get_quote(symbol)["price"])

@@ -204,8 +204,6 @@ def run_once(
 
 def validate_runtime_config() -> None:
     """Validate required credentials."""
-    if not CONFIG.twelve_data_api_key:
-        raise ValueError("TWELVE_DATA_API_KEY ausente. Configure no .env.")
     if not CONFIG.dry_run and (not CONFIG.telegram_bot_token or not CONFIG.telegram_chat_id):
         raise ValueError(
             "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID ausentes. Configure no .env para envio real."
@@ -221,10 +219,7 @@ def main() -> None:
     state_manager = StateManager(Path(CONFIG.state_file))
     state = state_manager.load()
 
-    client = TwelveDataClient(
-        base_url=CONFIG.base_url_twelve,
-        api_key=CONFIG.twelve_data_api_key,
-    )
+    client = TwelveDataClient()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)

@@ -15,11 +15,9 @@ load_dotenv()
 class Config:
     """Application settings loaded from env."""
 
-    twelve_data_api_key: str = os.getenv("TWELVE_DATA_API_KEY", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-    base_url_twelve: str = os.getenv("TWELVE_DATA_BASE_URL", "https://api.twelvedata.com")
     dry_run: bool = os.getenv("DRY_RUN", "true").lower() in {"1", "true", "yes", "on"}
 
     timeframe_signal: str = os.getenv("TIMEFRAME_SIGNAL", "15min")
