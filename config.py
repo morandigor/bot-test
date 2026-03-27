@@ -35,9 +35,11 @@ class Config:
     outputsize: int = int(os.getenv("OUTPUTSIZE", "500"))
 
     check_interval_seconds: int = int(os.getenv("CHECK_INTERVAL_SECONDS", "300"))
+    min_signals_per_day: int = int(os.getenv("MIN_SIGNALS_PER_DAY", "1"))
     max_signals_per_day: int = int(os.getenv("MAX_SIGNALS_PER_DAY", "3"))
     cooldown_hours_per_symbol: int = int(os.getenv("COOLDOWN_HOURS_PER_SYMBOL", "4"))
     duplicate_window_minutes: int = int(os.getenv("DUPLICATE_WINDOW_MINUTES", "360"))
+    force_signal_after_hour: int = int(os.getenv("FORCE_SIGNAL_AFTER_HOUR", "20"))
 
     timezone: str = os.getenv("BOT_TIMEZONE", "UTC")
     state_file: str = os.getenv("STATE_FILE", "state.json")

@@ -12,6 +12,8 @@ from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from config import CONFIG, SYMBOL_CANDIDATES
+from indicators import atr, ema, macd, rsi
+from risk import calculate_levels
 from state import StateManager
 from strategy import Signal, generate_signal
 from telegram import send_message
@@ -111,6 +113,78 @@ def log_event(logger: logging.Logger, event: str, **data: object) -> None:
     logger.info(json.dumps(payload, default=str))
 
 
+def build_fallback_signal(symbol: str, df_15m: object, df_1h: object) -> Optional[Signal]:
+    """Build a best-effort daily fallback signal when no standard setup appears."""
+    data = df_15m.copy()
+    trend_h1 = df_1h.copy()
+    if len(data) < 220 or len(trend_h1) < 220:
+        return None
+
+    data["ema50"] = ema(data["close"], 50)
+    data["ema200"] = ema(data["close"], 200)
+    data["rsi14"] = rsi(data["close"], 14)
+    data["atr14"] = atr(data, 14)
+    data = data.join(macd(data["close"]))
+
+    trend_h1["ema50"] = ema(trend_h1["close"], 50)
+    trend_h1["ema200"] = ema(trend_h1["close"], 200)
+
+    last = data.iloc[-1]
+    h1_last = trend_h1.iloc[-1]
+
+    direction = "BUY" if last["ema50"] >= last["ema200"] else "SELL"
+    h1_confirms = (direction == "BUY" and h1_last["ema50"] >= h1_last["ema200"]) or (
+        direction == "SELL" and h1_last["ema50"] <= h1_last["ema200"]
+    )
+    macd_supports = (direction == "BUY" and last["macd_hist"] >= 0) or (
+        direction == "SELL" and last["macd_hist"] <= 0
+    )
+    rsi_supports = (direction == "BUY" and last["rsi14"] >= 50) or (
+        direction == "SELL" and last["rsi14"] <= 50
+    )
+
+    score = 2
+    reasons = ["fallback diário"]
+    if h1_confirms:
+        score += 1
+        reasons.append("trend 1h confirma")
+    if rsi_supports:
+        score += 1
+        reasons.append("RSI alinhado")
+    if macd_supports:
+        score += 1
+        reasons.append("MACD alinhado")
+
+    levels = calculate_levels(
+        direction=direction,
+        entry=float(last["close"]),
+        atr_value=float(last["atr14"]),
+        df=data,
+        min_rr=0.5,
+        preferred_rr=1.0,
+    )
+    if not levels:
+        return None
+
+    partials = levels.get("partials", [])
+    tp2 = partials[0] if len(partials) > 0 else None
+    tp3 = partials[1] if len(partials) > 1 else None
+
+    return Signal(
+        symbol=symbol,
+        direction=direction,
+        entry=float(levels["entry"]),
+        sl=float(levels["sl"]),
+        tp=float(levels["tp"]),
+        rr=float(levels["rr"]),
+        timestamp=data.index[-1].isoformat(),
+        score=score,
+        reason=" + ".join(reasons),
+        tp2=float(tp2) if tp2 is not None else None,
+        tp3=float(tp3) if tp3 is not None else None,
+    )
+
+
 def run_once(
     logger: logging.Logger,
     client: TwelveDataClient,
@@ -125,6 +199,8 @@ def run_once(
     if int(state["daily_count"].get("count", 0)) >= CONFIG.max_signals_per_day:
         log_event(logger, "daily_cap_reached", count=state["daily_count"].get("count", 0))
         return
+
+    fallback_candidates: list[Signal] = []
 
     for canonical_symbol in SYMBOL_CANDIDATES.keys():
         if int(state["daily_count"].get("count", 0)) >= CONFIG.max_signals_per_day:
@@ -153,6 +229,9 @@ def run_once(
         )
 
         if not sig:
+            fallback_sig = build_fallback_signal(canonical_symbol, df_15, df_1h)
+            if fallback_sig:
+                fallback_candidates.append(fallback_sig)
             log_event(logger, "no_setup", symbol=canonical_symbol, used_symbol=used_symbol)
             continue
 
@@ -200,6 +279,60 @@ def run_once(
                 now=now,
             )
             state_manager.save(state)
+
+    daily_sent = int(state["daily_count"].get("count", 0))
+    should_force_daily_signal = (
+        daily_sent < CONFIG.min_signals_per_day
+        and daily_sent < CONFIG.max_signals_per_day
+        and now.hour >= CONFIG.force_signal_after_hour
+        and bool(fallback_candidates)
+    )
+    if not should_force_daily_signal:
+        return
+
+    fallback_sig = max(fallback_candidates, key=lambda candidate: (candidate.score, candidate.rr))
+    allowed = state_manager.can_send_signal(
+        state=state,
+        symbol=fallback_sig.symbol,
+        direction=fallback_sig.direction,
+        now=now,
+        max_signals_per_day=CONFIG.max_signals_per_day,
+        cooldown_hours=CONFIG.cooldown_hours_per_symbol,
+        duplicate_window_minutes=CONFIG.duplicate_window_minutes,
+    )
+    if not allowed:
+        log_event(
+            logger,
+            "fallback_blocked_by_limits",
+            symbol=fallback_sig.symbol,
+            direction=fallback_sig.direction,
+        )
+        return
+
+    text = format_signal_message(fallback_sig)
+    sent = send_message(
+        bot_token=CONFIG.telegram_bot_token,
+        chat_id=CONFIG.telegram_chat_id,
+        message=text,
+        dry_run=CONFIG.dry_run,
+    )
+    log_event(
+        logger,
+        "fallback_signal_sent" if sent else "fallback_signal_send_failed",
+        symbol=fallback_sig.symbol,
+        direction=fallback_sig.direction,
+        score=fallback_sig.score,
+        rr=fallback_sig.rr,
+        dry_run=CONFIG.dry_run,
+    )
+    if sent:
+        state_manager.register_signal(
+            state=state,
+            symbol=fallback_sig.symbol,
+            direction=fallback_sig.direction,
+            now=now,
+        )
+        state_manager.save(state)
 
 
 def validate_runtime_config() -> None:

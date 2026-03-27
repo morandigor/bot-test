@@ -82,9 +82,11 @@ DRY_RUN=true
 TIMEFRAME_SIGNAL=15min
 TIMEFRAME_TREND=1h
 CHECK_INTERVAL_SECONDS=300
+MIN_SIGNALS_PER_DAY=1
 MAX_SIGNALS_PER_DAY=3
 COOLDOWN_HOURS_PER_SYMBOL=4
 DUPLICATE_WINDOW_MINUTES=360
+FORCE_SIGNAL_AFTER_HOUR=20
 BOT_TIMEZONE=UTC
 STATE_FILE=state.json
 LOG_FILE=logs/bot.log
@@ -106,6 +108,7 @@ Workflow pronto em `.github/workflows/signal_bot.yml`:
 - Executa `python bot_once.py` (um ciclo por run)
 - Restaura e salva `state.json` e `logs/` via cache para manter cooldown/contador
 - Em `Run workflow`, voce pode marcar `send_test_message` para enviar uma mensagem fixa no Telegram sem depender de sinal
+- Se nenhum setup padrao aparecer ate `FORCE_SIGNAL_AFTER_HOUR`, o bot envia um fallback diario para garantir pelo menos `MIN_SIGNALS_PER_DAY`
 
 Configure no repositório (Settings -> Secrets and variables -> Actions):
 
